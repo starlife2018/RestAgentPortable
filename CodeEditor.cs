@@ -18,7 +18,7 @@ using ICSharpCode.AvalonEdit.Rendering;
 
 namespace RestAgent
 {
-    // Load the editor from the executable, so portable installations need no extra DLL.
+    // Библиотека редактора встроена в EXE: рядом с portable-приложением не нужна отдельная DLL.
     static class EmbeddedDependencies
     {
         static Assembly editorAssembly;
@@ -33,6 +33,7 @@ namespace RestAgent
         }
     }
 
+    // Общий редактор тела запроса и ответа: язык, подсветка, форматирование и сворачивание.
     public sealed class CodeEditor : TextEditor
     {
         readonly DispatcherTimer refreshTimer;
@@ -59,6 +60,7 @@ namespace RestAgent
             Options.IndentationSize = 2; Options.ConvertTabsToSpaces = true;
             folding = FoldingManager.Install(TextArea);
             TextArea.TextView.ElementGenerators.Insert(0, new JsonGroupGenerator(this, folding));
+            // Ждём короткую паузу во вводе, чтобы не пересчитывать блоки при каждом символе.
             refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
             refreshTimer.Tick += delegate { RefreshSyntax(); };
             TextChanged += delegate { refreshTimer.Stop(); refreshTimer.Start(); };
@@ -66,6 +68,7 @@ namespace RestAgent
             Loaded += delegate { RefreshSyntax(); };
         }
 
+        // Заменяем TextBox-заглушки из XAML, сохраняя имена для window.FindName в контроллере.
         public static void Install(Window window)
         {
             foreach (string name in new[] { "Body", "ResponseBody" })
@@ -89,6 +92,7 @@ namespace RestAgent
             TextArea.TextView.Redraw();
         }
         public void SetContentType(string value) { contentType = value ?? ""; RefreshSyntax(); }
+        // Сначала доверяем Content-Type; если он не распознан, проверяем начало текста.
         public static string Detect(string text, string mime)
         {
             mime = (mime ?? "").Split(';')[0].Trim().ToLowerInvariant();
@@ -116,7 +120,8 @@ namespace RestAgent
             refreshTimer.Stop(); SyntaxLanguage = mode == "Авто" ? Detect(Text, contentType) : mode;
             SyntaxHighlighting = SyntaxLanguage == "JSON" ? JsonHighlighting() : SyntaxLanguage == "Текст" ? null : HighlightingManager.Instance.GetDefinition(SyntaxLanguage == "SQL" ? "TSQL" : SyntaxLanguage);
             RefreshTheme();
-            // Highlighting is virtualized. Limit full-document folding scans for very large responses.
+            // Подсветка отрисовывается по видимым строкам, а поиск блоков читает весь документ.
+            // Для текста больше 2 МиБ отключаем этот поиск, чтобы не задерживать интерфейс.
             var folds = new List<NewFolding>();
             if (Document.TextLength <= 2 * 1024 * 1024)
             {
@@ -132,6 +137,8 @@ namespace RestAgent
             jsonArrayItems.Clear();
             if (SyntaxLanguage == "JSON")
             {
+                // Запоминаем блоки непосредственно внутри массивов: кнопка «Группы»
+                // свернёт эти элементы независимо, оставив массив и внешний объект раскрытыми.
                 var parents = new Stack<NewFolding>();
                 foreach (var section in folds)
                 {
@@ -146,7 +153,8 @@ namespace RestAgent
             var changed = SyntaxChanged; if (changed != null) changed(this, EventArgs.Empty);
         }
 
-        // Scan strings and comments as units: braces inside a quoted value never make a fold.
+        // Скобки внутри строк и комментариев не задают границы блока.
+        // Стек хранит позиции открывающих скобок, чтобы находить вложенные пары за один проход.
         public static List<NewFolding> BraceFoldings(string text, bool json = false)
         {
             var result = new List<NewFolding>(); var stack = new Stack<int>();
@@ -194,8 +202,8 @@ namespace RestAgent
             foreach (var section in folding.AllFoldings) section.IsFolded = jsonArrayItems.Contains(section.StartOffset);
             ScrollToHome();
         }
-        // Keep previews bounded even for deeply nested documents or long string values.
-        // Only whitespace outside quoted values is compacted; the source is never changed.
+        // Превью ограничено по длине и объёму сканирования даже для огромной строки JSON.
+        // Убираем лишние пробелы только вне строк; исходный документ остаётся неизменным.
         internal static string CompactJsonPreview(string text, int start, int end)
         {
             const int limit = 240, scanLimit = 1024;
@@ -217,14 +225,15 @@ namespace RestAgent
             }
             if (i < end)
             {
+                // Не оставляем половину пары UTF-16 при обрезке эмодзи или другого символа.
                 if (preview.Length > 0 && char.IsHighSurrogate(preview[preview.Length - 1])) preview.Length--;
                 preview.Append(" …");
             }
             return preview.ToString();
         }
 
-        // Replace just the visual opening bracket (and hidden content when folded).
-        // The normal folding generator stays installed to track collapsed document lines.
+        // Добавляем стрелку и превью на уровне отрисовки, не заменяя текст документа.
+        // Штатный механизм AvalonEdit продолжает учитывать скрытые строки и позиции курсора.
         sealed class JsonGroupGenerator : VisualLineElementGenerator
         {
             readonly CodeEditor editor;
@@ -278,7 +287,8 @@ namespace RestAgent
         }
         public static string PrettyXml(string text)
         {
-            // Preserve significant whitespace and mixed content; do not fetch external entities.
+            // Сохраняем значимые пробелы и смешанное содержимое XML.
+            // DTD и загрузка внешних сущностей запрещены: форматирование не обращается к сети.
             var document = new XmlDocument { XmlResolver = null, PreserveWhitespace = true };
             using (var reader = XmlReader.Create(new StringReader(text), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null })) document.Load(reader);
             var output = new StringBuilder();
@@ -292,7 +302,7 @@ namespace RestAgent
             if (SyntaxLanguage == "JSON") formatted = Data.Pretty(Text, true);
             else if (SyntaxLanguage == "XML") formatted = PrettyXml(Text);
             else throw new ArgumentException("Форматирование доступно для JSON и XML. Выберите нужный формат над текстом.");
-            // Document.Replace preserves the request editor's undo history.
+            // Замена через Document сохраняет возможность отменить форматирование в редакторе.
             Document.Replace(0, Document.TextLength, formatted); RefreshSyntax();
         }
     }

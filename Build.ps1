@@ -1,4 +1,6 @@
 ﻿param([string]$OutputName = "RestAgentPortable.exe")
+# Сборка использует csc из установленного .NET Framework и локальную библиотеку vendor.
+# OutputName позволяет собрать проверочный EXE, не заменяя запущенное приложение.
 $ErrorActionPreference = 'Stop'
 $projectPath = $PSScriptRoot
 $frameworkPath = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319'
@@ -9,6 +11,7 @@ Add-Type -AssemblyName System.Drawing
 $iconPath = Join-Path $projectPath 'App.ico'
 $iconStream = [IO.File]::Create($iconPath)
 $writer = New-Object IO.BinaryWriter($iconStream)
+# Несколько размеров в ICO нужны для чёткого значка в заголовке, проводнике и панели задач.
 $sizes = @(256, 128, 64, 48, 32, 24, 16)
 $sourceImage = [Drawing.Image]::FromFile((Join-Path $projectPath 'App.png'))
 $images = @()
@@ -25,6 +28,7 @@ foreach ($size in $sizes) {
 }
 $sourceImage.Dispose()
 $writer.Write([uint16]0); $writer.Write([uint16]1); $writer.Write([uint16]$sizes.Count)
+# Смещение первой PNG: 6 байт заголовка ICO и по 16 байт описания каждого изображения.
 $offset = 6 + 16 * $sizes.Count
 for ($index = 0; $index -lt $sizes.Count; $index++) {
     $dimension = if ($sizes[$index] -eq 256) { 0 } else { $sizes[$index] }
@@ -36,6 +40,8 @@ for ($index = 0; $index -lt $sizes.Count; $index++) {
 foreach ($bytes in $images) { $writer.Write([byte[]]$bytes) }
 $writer.Dispose()
 
+# Разметку, реестр заголовков, подсветку, DLL редактора и его лицензию встраиваем в EXE.
+# Имена ресурсов должны совпадать с GetManifestResourceStream в исходниках C#.
 $references = @('System.dll', 'System.Core.dll', 'System.Net.Http.dll', 'System.Web.Extensions.dll', 'System.Xml.dll', 'WPF/WindowsBase.dll', 'WPF/PresentationCore.dll', 'WPF/PresentationFramework.dll', 'System.Xaml.dll')
 $arguments = @('/nologo', '/target:winexe', '/platform:anycpu', '/optimize+', '/utf8output', ('/out:' + (Join-Path $projectPath $OutputName)), ('/win32icon:' + $iconPath), ('/resource:' + (Join-Path $projectPath 'Main.xaml') + ',Main.xaml'), ('/resource:' + $iconPath + ',App.ico'))
 foreach ($reference in $references) { $arguments += '/reference:' + (Join-Path $frameworkPath $reference) }

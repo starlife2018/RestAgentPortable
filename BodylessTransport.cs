@@ -9,9 +9,8 @@ using System.Threading.Tasks;
 
 namespace RestAgent
 {
-    // Framework HttpClientHandler opens a write stream whenever HttpContent exists,
-    // even when it only carries Content-Type and has zero bytes. GET/HEAD need
-    // headers without a write stream, so use HttpWebRequest's public header API.
+    // В .NET Framework наличие HttpContent открывает поток записи даже при пустом теле.
+    // Для GET/HEAD передаём заголовки через HttpWebRequest, не создавая поток тела запроса.
     public static class BodylessTransport
     {
         public static async Task<HttpResponseMessage> Send(Request request, Uri uri, CancellationToken token)
@@ -21,10 +20,13 @@ namespace RestAgent
             var outgoing = (HttpWebRequest)WebRequest.Create(uri);
             outgoing.Method = request.Method;
             outgoing.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+            // Показываем ответ 3xx пользователю; авторизация не пересылается на другой адрес.
             outgoing.AllowAutoRedirect = false;
             outgoing.CookieContainer = null;
             outgoing.ConnectionGroupName = "RestAgent-" + Guid.NewGuid().ToString("N");
             foreach (var pair in request.Headers.Where(p => p.Enabled && !string.IsNullOrWhiteSpace(p.Name))) AddHeader(outgoing, pair);
+            // Общий срок охватывает и ожидание заголовков, и чтение тела. Abort прерывает
+            // HttpWebRequest, у которого асинхронный метод не принимает CancellationToken.
             using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
                 deadline.CancelAfter(TimeSpan.FromSeconds(request.Timeout));
@@ -36,7 +38,8 @@ namespace RestAgent
                         try { incoming = (HttpWebResponse)await outgoing.GetResponseAsync(); }
                         catch (WebException ex)
                         {
-                            // HTTP errors are valid responses in an API tester.
+                            // Ответы 4xx/5xx тоже показываем с телом; исключение без ответа
+                            // означает сетевую ошибку, которую должен обработать контроллер.
                             incoming = ex.Response as HttpWebResponse;
                             if (incoming == null) throw;
                         }
@@ -44,6 +47,7 @@ namespace RestAgent
                         using (var body = incoming.GetResponseStream())
                         using (var buffer = new MemoryStream())
                         {
+                            // Проверяем лимит по мере чтения, в том числе после распаковки gzip/deflate.
                             var chunk = new byte[8192]; int count;
                             while (body != null && (count = await body.ReadAsync(chunk, 0, chunk.Length, deadline.Token)) != 0)
                             {
@@ -70,6 +74,8 @@ namespace RestAgent
             }
         }
 
+        // Часть заголовков HttpWebRequest запрещает задавать через Headers.Add:
+        // для них используем специальные свойства. Переносы строк запрещены во всех значениях.
         static void AddHeader(HttpWebRequest outgoing, Pair pair)
         {
             string name = pair.Name.Trim(), value = pair.Value ?? "";
@@ -104,6 +110,7 @@ namespace RestAgent
             }
         }
 
+        // Разбираем обычный диапазон (0-1023), открытый (0-) и последние N байт (-1024).
         static void AddRange(HttpWebRequest outgoing, string value)
         {
             int equals = value.IndexOf('=');

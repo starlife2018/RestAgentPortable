@@ -11,6 +11,7 @@ using System.Windows.Media;
 
 namespace RestAgent
 {
+    // Одна подсказка каталога; этот же формат используется для примеров query-параметров.
     public sealed class HeaderInfo
     {
         public string Name { get; set; }
@@ -67,6 +68,8 @@ namespace RestAgent
         static readonly string[] popular = { "Accept", "Authorization", "Content-Type", "X-API-Key", "Cookie", "User-Agent", "Accept-Language", "Accept-Encoding", "Cache-Control", "Origin", "Referer", "Range", "If-Match", "If-None-Match", "If-Modified-Since", "If-Unmodified-Since", "If-Range", "Content-Encoding", "Content-Language", "Content-Length", "Content-Disposition", "Host", "Connection", "Expect", "Pragma", "Prefer", "Forwarded", "X-Auth-Token", "X-Request-ID", "X-Correlation-ID", "X-CSRF-Token", "X-XSRF-Token", "X-Requested-With", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Idempotency-Key", "traceparent", "tracestate", "baggage", "Access-Control-Request-Method", "Access-Control-Request-Headers" };
         public static readonly HeaderInfo[] Entries = Load();
         public static string[] Names { get { return Entries.Select(h => h.Name).ToArray(); } }
+        // Снимок реестра встроен в EXE и доступен без Интернета. Дополняем его частыми
+        // нестандартными именами; словарь без учёта регистра убирает дубликаты заголовков.
         static HeaderInfo[] Load()
         {
             var entries = new Dictionary<string, HeaderInfo>(StringComparer.OrdinalIgnoreCase);
@@ -85,6 +88,7 @@ namespace RestAgent
             foreach (var name in popular) if (!entries.ContainsKey(name)) entries[name] = new HeaderInfo { Name = name, Description = descriptions[name], Common = true };
             return entries.Values.OrderBy(h => h.Name, StringComparer.OrdinalIgnoreCase).ToArray();
         }
+        // Имя HTTP-заголовка — непустой ASCII token; пробелы и переносы строк недопустимы.
         public static bool IsValidName(string name)
         {
             return !string.IsNullOrEmpty(name) && name.All(c => c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || "!#$%&'*+-.^_`|~".IndexOf(c) >= 0);
@@ -107,6 +111,8 @@ namespace RestAgent
                 default: return new string[0];
             }
         }
+        // Общий диалог для заголовка и параметра. existing задаёт режим редактирования;
+        // возвращаем новую строку только после подтверждения, null означает отмену.
         public static Pair Pick(Window owner, IEnumerable<string> customNames, Pair existing = null, bool query = false)
         {
             Pair result = null;

@@ -10,12 +10,15 @@ using Microsoft.Win32;
 
 namespace RestAgent
 {
+    // Диалог работает с копиями палитр: выбор и ввод цвета дают предпросмотр,
+    // а постоянная запись выполняется только кнопкой «Применить».
     public sealed partial class Controller
     {
         static T SettingsControl<T>(Window dialog, string name, T control) where T : FrameworkElement
         { control.Name = name; dialog.RegisterName(name, control); return control; }
         Window CreateSettingsDialog()
         {
+            // Снимок нужен для отката оформления при отмене или закрытии крестиком.
             var before = Data.Clone(themes.Current);
             var working = new ObservableCollection<AppTheme>(themes.AllThemes());
             bool loading = false, committed = false;
@@ -60,6 +63,7 @@ namespace RestAgent
             footer.Children.Add(new Button { Content = "Отмена", IsCancel = true, Margin = new Thickness(0) });
 
             Func<string, string> uniqueName = basis => { string candidate = basis; int suffix = 2; while (working.Any(t => string.Equals(t.Name, candidate, StringComparison.OrdinalIgnoreCase))) candidate = basis + " " + suffix++; return candidate; };
+            // Собираем и проверяем черновик из полей, не изменяя выбранный шаблон.
             Func<AppTheme> readDraft = delegate
             {
                 var selected = choices.SelectedItem as AppTheme;
@@ -93,6 +97,8 @@ namespace RestAgent
                 if (!valid) { error.Text = "Цвет должен содержать # и 6 шестнадцатеричных цифр, например #237B91."; return; }
                 try { var draft = readDraft(); themes.Preview(draft); error.Text = ""; } catch (ArgumentException ex) { error.Text = ex.Message; }
             };
+            // «Сохранить тему» обновляет рабочий список диалога. Для готового шаблона
+            // создаём пользовательскую копию с новым ID, сохраняя сам шаблон неизменным.
             Func<bool> saveDraft = delegate
             {
                 try
@@ -140,6 +146,8 @@ namespace RestAgent
                     if (changed && !saveDraft()) return;
                     selected = (AppTheme)choices.SelectedItem;
                     themes.Commit(new ThemeStore { ActiveThemeId = selected.Id, CustomThemes = working.Where(t => t.Id.StartsWith("custom-", StringComparison.Ordinal)).ToList() });
+                    // Реестр автозапуска меняем только при подтверждении настроек
+                    // и только если пользователь действительно переключил этот флажок.
                     if ((startup.IsChecked == true) != startupBefore)
                         using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
                         { if (startup.IsChecked == true) key.SetValue("RestAgentPortable", "\"" + Assembly.GetExecutingAssembly().Location + "\""); else key.DeleteValue("RestAgentPortable", false); }

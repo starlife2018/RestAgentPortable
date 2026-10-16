@@ -21,11 +21,15 @@ using Microsoft.Win32;
 
 namespace RestAgent
 {
+    // Строка таблицы заголовков или параметров. Уведомления нужны и привязкам WPF,
+    // и контроллеру: правка ячейки должна обновлять URL и признак несохранённых изменений.
     public class Pair : System.ComponentModel.INotifyPropertyChanged
     {
         bool enabled; string name; string value; bool changingSuggestions;
         public event System.ComponentModel.PropertyChangedEventHandler PropertyChanged;
         public bool Enabled { get { return enabled; } set { if (enabled != value) { enabled = value; Changed("Enabled"); } } }
+        // Обновление подсказок ComboBox может временно записать новое значение обратно.
+        // Флаг сохраняет введённый пользователем текст при смене имени заголовка.
         public string Name { get { return name; } set { if (name != value) { name = value; Changed("Name"); changingSuggestions = true; try { Changed("ValueSuggestions"); } finally { changingSuggestions = false; } Changed("Value"); } } }
         public string Value { get { return this.value; } set { if (!changingSuggestions && this.value != value) { this.value = value; Changed("Value"); } } }
         void Changed(string property) { var handler = PropertyChanged; if (handler != null) handler(this, new System.ComponentModel.PropertyChangedEventArgs(property)); }
@@ -37,6 +41,7 @@ namespace RestAgent
         public Pair() { Enabled = true; Name = ""; Value = ""; }
     }
 
+    // Сохраняемая модель запроса; коллекция и история содержат её независимые копии.
     public class Request
     {
         public string Id { get; set; }
@@ -52,6 +57,7 @@ namespace RestAgent
         public override string ToString() { return Method + "  " + Name; }
     }
 
+    // Иерархия хранится плоским списком: ParentId ссылается на родителя, null означает корень.
     public class Folder
     {
         public string Id { get; set; }
@@ -59,6 +65,7 @@ namespace RestAgent
         public string Name { get; set; }
     }
 
+    // Формат workspace.json. Версия проверяется при чтении, записи и импорте.
     public class Workspace
     {
         public int Version { get; set; }
@@ -68,10 +75,15 @@ namespace RestAgent
         public Workspace() { Version = 1; Folders = new List<Folder>(); Requests = new List<Request>(); History = new List<Request>(); }
     }
 
+    // Работа с форматом коллекций и URL без зависимости от элементов интерфейса.
     public static class Data
     {
         public static JavaScriptSerializer Serializer() { return new JavaScriptSerializer { MaxJsonLength = 32 * 1024 * 1024, RecursionLimit = 128 }; }
+        // Глубокая копия позволяет сначала подготовить изменения, а затем сохранить их целиком.
         public static T Clone<T>(T value) { return Serializer().Deserialize<T>(Serializer().Serialize(value)); }
+        // Форматируем исходный JSON посимвольно после проверки его корректности.
+        // Это сохраняет запись чисел (например, 1.2500); readableUnicode включается для показа,
+        // а при хранении коллекций действует прежнее экранирование сериализатора.
         public static string Pretty(string json, bool readableUnicode = false)
         {
             Serializer().DeserializeObject(json);
@@ -90,8 +102,9 @@ namespace RestAgent
                         {
                             output.Append(unicode); output.Append(low); index += 11; continue;
                         }
-                        // Keep JSON delimiters, invisible controls and lone surrogates escaped.
-                        // A literal \\uXXXX is never decoded a second time.
+                        // Кавычки, обратный слеш, управляющие символы и непарные суррогаты
+                        // остаются экранированными, чтобы результат был корректным JSON.
+                        // Текст с буквальным \\uXXXX не декодируется повторно.
                         if (!char.IsSurrogate(unicode) && !char.IsControl(unicode) && unicode != '"' && unicode != '\\' && unicode != '\u2028' && unicode != '\u2029')
                         {
                             output.Append(unicode); index += 5; continue;
@@ -126,6 +139,8 @@ namespace RestAgent
             }
             value = (char)number; return true;
         }
+        // Проверяем не только поля, но и связи: дубли ID, отсутствующих родителей и циклы папок.
+        // Некорректный импорт должен быть отклонён до изменения рабочей коллекции.
         public static void Validate(Workspace workspace)
         {
             if (workspace == null || workspace.Version != 1 || workspace.Folders == null || workspace.Requests == null || workspace.History == null)
@@ -161,6 +176,7 @@ namespace RestAgent
                 if (!string.IsNullOrEmpty(request.FolderId) && !folders.ContainsKey(request.FolderId)) throw new InvalidDataException("Папка запроса не найдена.");
             }
         }
+        // Сначала пишем временный файл. Замена готовым файлом сохраняет предыдущую версию в .bak.
         public static void Write(string path, Workspace workspace)
         {
             Validate(workspace);
@@ -179,14 +195,15 @@ namespace RestAgent
             Uri uri;
             if (!Uri.TryCreate((request.Url ?? "").Trim(), UriKind.Absolute, out uri) || (uri.Scheme != "http" && uri.Scheme != "https")) throw new ArgumentException("Укажите полный HTTP или HTTPS URL.");
             var builder = new UriBuilder(uri);
-            // Table rows own these names, including disabled rows. Replace matching
-            // URL fields instead of appending stale copies; repeated table rows
-            // are intentional (arrays and repeated filter keys).
+            // Таблица определяет значения своих имён, в том числе выключенных строк:
+            // одноимённые поля исходного URL удаляем, чтобы не отправить старое значение.
+            // Повторяющиеся строки таблицы сохраняем: они нужны для массивов и фильтров.
             var names = new HashSet<string>(request.Queries.Where(p => !string.IsNullOrWhiteSpace(p.Name)).Select(p => p.Name.Trim()), StringComparer.Ordinal);
             var fields = uri.Query.TrimStart('?').Split('&').Where(p => p.Length > 0 && !names.Contains(DecodeQuery(p.Split('=')[0]))).ToList();
             fields.AddRange(request.Queries.Where(p => p.Enabled && !string.IsNullOrWhiteSpace(p.Name)).Select(p => Uri.EscapeDataString(p.Name.Trim()) + "=" + Uri.EscapeDataString(p.Value ?? "")));
             builder.Query = string.Join("&", fields); return builder.Uri;
         }
+        // В query символ '+' означает пробел, а буквальный плюс должен приходить как %2B.
         static string DecodeQuery(string value) { return Uri.UnescapeDataString(value.Replace("+", " ")); }
         public static List<Pair> ParseQuery(Uri uri)
         {
@@ -199,6 +216,8 @@ namespace RestAgent
         public static string WithoutQuery(Uri uri) { return new UriBuilder(uri) { Query = "" }.Uri.AbsoluteUri; }
     }
 
+    // Связывает Main.xaml с моделями, хранилищем и HTTP. Навигация и настройки вынесены
+    // в другие части partial-класса: Navigation.cs, Themes.cs и ThemeSettings.cs.
     public sealed partial class Controller
     {
         readonly Window window;
@@ -209,6 +228,8 @@ namespace RestAgent
         ObservableCollection<Pair> queries;
         CancellationTokenSource cancellation;
         bool dirty;
+        // Программная загрузка и синхронизация не должны помечать запрос изменённым
+        // или вызывать бесконечную цепочку URL -> таблица -> URL.
         bool loading;
         bool synchronizingUrl;
         string baseUrl;
@@ -226,6 +247,7 @@ namespace RestAgent
             }
             catch (Exception ex)
             {
+                // При ошибке чтения не перезаписываем исходный файл пустой коллекцией.
                 readOnlyData = true;
                 MessageBox.Show(window, "Не удалось загрузить данные: " + ex.Message + "\nИсходный файл сохранён. Экспортируйте новую коллекцию или восстановите workspace.json.bak.", "Rest Agent", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
@@ -234,6 +256,7 @@ namespace RestAgent
             Bind("ItemActions", delegate { var item = Control<TreeView>("Library").SelectedItem as TreeViewItem; if (item != null && item.ContextMenu != null) { item.ContextMenu.PlacementTarget = Control<Button>("ItemActions"); item.ContextMenu.IsOpen = true; } });
             Control<TreeView>("Library").PreviewKeyDown += delegate(object sender, KeyEventArgs e)
             {
+                // Delete в поле переименования удаляет символ, а не запрос или папку.
                 if (IsTextEditing(e.OriginalSource as DependencyObject) || IsTextEditing(Keyboard.FocusedElement as DependencyObject)) return;
                 var item = Control<TreeView>("Library").SelectedItem as TreeViewItem;
                 if (item == null || item.Tag == null) return;
@@ -298,7 +321,7 @@ namespace RestAgent
                 if (request != null && request.Id != current.Id)
                 {
                     if (!CanLeave()) { item.IsSelected = false; RestoreLibrarySelection(); return; }
-                    // Saving in CanLeave can rebuild the tree; resolve the target by ID.
+                    // Сохранение в CanLeave может пересоздать дерево: заново ищем запрос по ID.
                     request = workspace.Requests.FirstOrDefault(r => r.Id == request.Id);
                     if (request == null) return;
                     Load(request);
@@ -336,6 +359,7 @@ namespace RestAgent
         void Error(string message) { MessageBox.Show(window, message, "Rest Agent", MessageBoxButton.OK, MessageBoxImage.Warning); }
         void Notice(string message) { Control<TextBlock>("Notice").Text = message; }
         void MarkDirty() { if (!loading && !synchronizingUrl) { dirty = true; Control<TextBlock>("RequestTitle").Text = current.Name + " •"; } }
+        // Завершаем редактирование ячеек и названия до чтения значений из интерфейса.
         void Commit()
         {
             FinishTitleRename(true);
@@ -345,6 +369,7 @@ namespace RestAgent
             }
             Keyboard.ClearFocus();
         }
+        // Снимок редактора для отправки/сохранения; исходная модель current здесь не меняется.
         Request Capture()
         {
             Commit();
@@ -356,6 +381,8 @@ namespace RestAgent
             request.Timeout = timeout; request.Headers = Data.Clone(headers.ToList()); request.Queries = Data.Clone(queries.ToList());
             return request;
         }
+        // Редактор получает копию запроса. Параметры из готового URL объединяются с таблицей;
+        // строки таблицы имеют приоритет, поэтому повторное открытие не создаёт дубликаты.
         void Load(Request request)
         {
             FinishTitleRename(false);
@@ -381,6 +408,7 @@ namespace RestAgent
             Control<TextBlock>("RequestTitle").Text = current.Name; dirty = false; loading = false; UpdateUrl(false);
             Control<ComboBox>("RequestSyntax").SelectedIndex = 0; UpdateRequestSyntax();
         }
+        // Единая проверка несохранённых правок при смене запроса, копировании и закрытии окна.
         bool CanLeave()
         {
             Commit();
@@ -423,11 +451,13 @@ namespace RestAgent
             var next = Data.Clone(workspace); next.Requests.RemoveAll(r => r.Id == request.Id); next.Requests.Add(request);
             Persist(next); Load(request); selectedLibraryKey = NodeKey(request); RevealFolder(request.FolderId); RefreshLibrary(); Notice("Запрос сохранён"); return true;
         }
+        // Меняем коллекцию в памяти только после успешной записи на диск.
         void Persist(Workspace next)
         {
             if (readOnlyData) throw new IOException("Исходный файл данных повреждён. Восстановите его из резервной копии и перезапустите приложение либо экспортируйте коллекцию.");
             Directory.CreateDirectory(Path.GetDirectoryName(dataPath)); Data.Write(dataPath, next); workspace = next;
         }
+        // Устойчивый ключ переживает пересоздание TreeViewItem; префикс различает папку и запрос.
         static string NodeKey(object node)
         {
             var folder = node as Folder; var request = node as Request;
@@ -455,6 +485,8 @@ namespace RestAgent
             while (id != null) { expandedFolders[id] = true; var folder = workspace.Folders.FirstOrDefault(f => f.Id == id); id = folder == null ? null : folder.ParentId; }
             expandedFolders["root"] = true;
         }
+        // Перестраиваем дерево и историю с учётом поиска. Флаг блокирует обработчики выбора,
+        // чтобы обновление представления само по себе не заменяло текущий редактор.
         void RefreshLibrary()
         {
             refreshingLibrary = true;
@@ -468,7 +500,7 @@ namespace RestAgent
                 var empty = Control<TextBlock>("LibraryEmpty");
                 empty.Text = search.Length > 0 ? "Ничего не найдено.\nИзмените или очистите поиск." : "Пока нет сохранённых запросов.\nСоздайте каталог или сохраните запрос.";
                 empty.Visibility = root.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-                // Rebuilding history must not reopen a selected snapshot.
+                // Восстанавливаем выделение истории без повторного открытия её снимка.
                 var history = Control<ListBox>("History"); var selected = history.SelectedItem as Request;
                 history.ItemsSource = workspace.History.Where(r => search.Length == 0 || (r.Name + " " + r.Method + " " + r.Url).IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0).ToList(); if (selected != null) history.SelectedItem = selected;
                 var historyEmpty = Control<TextBlock>("HistoryEmpty"); historyEmpty.Visibility = history.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -555,6 +587,7 @@ namespace RestAgent
             if (request != null && current.Id == request.Id) { current.Name = name; Control<TextBlock>("RequestTitle").Text = name + (dirty ? " •" : ""); }
             RefreshLibrary();
         }
+        // Идём от папки назначения к корню: если встретим переносимую папку, возникнет цикл.
         bool CanMove(object node, string targetId)
         {
             if (node == null || !NodeExists(node)) return false;
@@ -591,6 +624,7 @@ namespace RestAgent
             if (MessageBox.Show(window, "Удалить «" + name + "»" + (folder != null ? " и всё содержимое папки?" : "?"), "Удаление", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
             DeleteNodeCore(node);
         }
+        // Для папки сначала собираем всех потомков, затем удаляем их вместе с запросами.
         void DeleteNodeCore(object node)
         {
             var next = Data.Clone(workspace); var folder = node as Folder; var request = node as Request;
@@ -636,6 +670,8 @@ namespace RestAgent
             if (headers != null && headers.Contains((Pair)sender)) UpdateRequestSyntax();
             MarkDirty();
         }
+        // Направление «таблица -> адрес»: выключенные параметры остаются в таблице,
+        // но отсутствуют в URL. Неполный адрес разрешён во время ввода и проверяется при отправке.
         void UpdateUrl(bool markDirty = true)
         {
             if (synchronizingUrl || loading || queries == null) return;
@@ -649,6 +685,8 @@ namespace RestAgent
             finally { synchronizingUrl = false; }
             if (markDirty) MarkDirty();
         }
+        // Направление «адрес -> таблица»: сопоставляем повторяющиеся имена по одному,
+        // сохраняя выключенные и ещё не заполненные строки, которых нет в новом адресе.
         void UrlEdited()
         {
             if (synchronizingUrl || loading || queries == null) return;
@@ -700,6 +738,8 @@ namespace RestAgent
         {
             var pair = Control<DataGrid>(name).SelectedItem as Pair; if (pair != null) { pair.PropertyChanged -= PairChanged; list.Remove(pair); MarkDirty(); }
         }
+        // В один момент выполняется один запрос. await возвращает управление WPF на время сети;
+        // finally восстанавливает кнопки при успехе, ошибке, отмене и таймауте.
         async Task Send()
         {
             if (cancellation != null) return;
@@ -719,6 +759,8 @@ namespace RestAgent
                 using (var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(request.Timeout) })
                 using (var message = new HttpRequestMessage(new HttpMethod(request.Method), uri))
                 {
+                    // GET/HEAD используют отдельный транспорт: в .NET Framework добавление
+                    // HttpContent даже ради Content-Type приводит к попытке отправить тело.
                     bool bodyless = request.Method == "GET" || request.Method == "HEAD";
                     if (!string.IsNullOrEmpty(request.Body))
                     {
@@ -746,6 +788,8 @@ namespace RestAgent
                         Control<CodeEditor>("ResponseBody").SetContentType(response.Content.Headers.ContentType == null ? "" : response.Content.Headers.ContentType.MediaType);
                         Control<TextBlock>("ResponseMeta").Text = timer.ElapsedMilliseconds + " мс  •  " + Encoding.UTF8.GetByteCount(text).ToString("N0") + " байт UTF-8";
                         try { if (Control<CodeEditor>("ResponseBody").SyntaxLanguage == "JSON" || Control<CodeEditor>("ResponseBody").SyntaxLanguage == "XML") Control<CodeEditor>("ResponseBody").FormatText(); } catch (ArgumentException) { } catch (InvalidOperationException) { } catch (System.Xml.XmlException) { }
+                        // История хранит отправленный снимок, а не ссылку на редактируемый запрос.
+                        // Ошибка её записи не должна скрывать уже полученный ответ.
                         var next = Data.Clone(workspace); next.History.Insert(0, request); next.History = next.History.Take(100).ToList();
                         try { Persist(next); RefreshLibrary(); Notice("Ответ получен. История сохранена."); } catch (Exception ex) { Notice("Ответ получен, история не сохранена: " + ex.Message); }
                     }
@@ -798,6 +842,7 @@ namespace RestAgent
             Control<TextBlock>("ResponseMeta").Foreground = Brushes.White;
             Control<TextBlock>("RequestAddress").Foreground = Brushes.White;
         }
+        // Берём полный текст документа: свёрнутые блоки и краткие превью не обрезают копию/файл.
         string ResponseText() { return Control<CodeEditor>("ResponseBody").Text; }
         void SaveResponse()
         {
@@ -813,6 +858,8 @@ namespace RestAgent
         {
             var dialog = new OpenFileDialog { Filter = "Коллекция JSON|*.json" }; if (dialog.ShowDialog(window) != true) return;
             var imported = Data.Read(dialog.FileName);
+            // Новые ID предотвращают конфликты при повторном импорте той же коллекции.
+            // Ссылки на родителей и папки запросов переводим через одну таблицу соответствий.
             var next = Data.Clone(workspace); var mapping = imported.Folders.ToDictionary(f => f.Id, f => Guid.NewGuid().ToString());
             foreach (var folder in imported.Folders) { string old = folder.Id; folder.Id = mapping[old]; folder.ParentId = string.IsNullOrEmpty(folder.ParentId) ? null : mapping[folder.ParentId]; next.Folders.Add(folder); }
             foreach (var request in imported.Requests) { request.Id = Guid.NewGuid().ToString(); request.FolderId = string.IsNullOrEmpty(request.FolderId) ? null : mapping[request.FolderId]; next.Requests.Add(request); }
@@ -841,6 +888,7 @@ namespace RestAgent
         }
     }
 
+    // Точка входа: зависимости загружаются из ресурсов EXE до создания контроллера и редакторов.
     public static class Program
     {
         [STAThread]

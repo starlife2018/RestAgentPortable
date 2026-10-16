@@ -11,6 +11,7 @@ using System.Windows.Threading;
 
 namespace RestAgent
 {
+    // Проверки тем вынесены отдельно: предпросмотр, применение, отмена и сохранность редактора.
     public static partial class SelfTest
     {
         static void ThemeDialog(Controller controller, Action<Window> action)

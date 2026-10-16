@@ -5,8 +5,8 @@ namespace RestAgent
 {
     public static class ParameterCatalog
     {
-        // Query names are API-specific. This catalog is a set of examples, not
-        // a registry of allowed names; arbitrary names and repeated rows work.
+        // У каждого API свой набор query-параметров. Это примеры для подсказок,
+        // а не список разрешённых имён: свои имена и повторяющиеся строки тоже допустимы.
         public static readonly HeaderInfo[] Entries = new[]
         {
             Item("page", "Номер страницы"), Item("per_page", "Количество записей на странице"),

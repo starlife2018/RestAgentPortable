@@ -9,7 +9,8 @@ using System.Windows.Media;
 
 namespace RestAgent
 {
-    // Adapt syntax ink to dark surfaces without changing documents or shared definitions.
+    // Осветляем цвета подсветки на тёмном фоне до контраста 4.5:1, если это возможно.
+    // Меняется только отрисовка: текст и общие определения языков остаются прежними.
     sealed class ThemeInkTransformer : ICSharpCode.AvalonEdit.Rendering.DocumentColorizingTransformer
     {
         readonly CodeEditor editor;
@@ -34,6 +35,7 @@ namespace RestAgent
             });
         }
     }
+    // Палитра хранится строками #RRGGBB: её удобно редактировать и сохранять в JSON.
     public sealed class AppTheme
     {
         public string Id { get; set; }
@@ -57,6 +59,7 @@ namespace RestAgent
         }
         public override string ToString() { return Name; }
     }
+    // В файле хранятся выбранная тема и пользовательские палитры; шаблоны задаются кодом.
     public sealed class ThemeStore
     {
         public int Version { get; set; }
@@ -64,6 +67,7 @@ namespace RestAgent
         public List<AppTheme> CustomThemes { get; set; }
         public ThemeStore() { Version = 1; ActiveThemeId = "light"; CustomThemes = new List<AppTheme>(); }
     }
+    // Разделяет временный предпросмотр (Preview) и запись подтверждённых настроек (Commit).
     public sealed class ThemeService
     {
         public static readonly string[] ColorKeys = { "Background", "Surface", "Input", "Text", "Muted", "Border", "Accent", "Sidebar", "SidebarText", "SidebarMuted", "SidebarHover", "SidebarSelected" };
@@ -88,6 +92,7 @@ namespace RestAgent
             catch (Exception ex) { LoadError = "Не удалось прочитать файл тем. Исходный файл сохранён: " + ex.Message; }
             Preview(AllThemes().FirstOrDefault(t => t.Id == store.ActiveThemeId) ?? Templates()[0]);
         }
+        // Каждый вызов создаёт новые объекты: редактор не может изменить исходные шаблоны.
         public static List<AppTheme> Templates()
         {
             return new List<AppTheme> {
@@ -126,6 +131,8 @@ namespace RestAgent
             }
             if (!Templates().Concat(data.CustomThemes).Any(t => t.Id == data.ActiveThemeId)) throw new ArgumentException("Активная тема не найдена.");
         }
+        // После ошибки чтения не затираем повреждённый файл; исправные данные заменяем
+        // через .tmp с резервной копией. Состояние в памяти обновляется после записи.
         public void Commit(ThemeStore next)
         {
             ValidateStore(next);
@@ -138,11 +145,14 @@ namespace RestAgent
         static Color Read(string hex) { Color value; TryColor(hex, out value); return value; }
         public static Color Mix(Color first, Color second, double amount)
         { return Color.FromRgb((byte)(first.R + (second.R - first.R) * amount), (byte)(first.G + (second.G - first.G) * amount), (byte)(first.B + (second.B - first.B) * amount)); }
+        // Относительная яркость в линейном sRGB используется для выбора контрастного текста.
         public static double Luminance(Color c)
         {
             Func<byte, double> channel = b => b / 255.0 <= 0.04045 ? b / 3294.6 : Math.Pow((b / 255.0 + 0.055) / 1.055, 2.4);
             return 0.2126 * channel(c.R) + 0.7152 * channel(c.G) + 0.0722 * channel(c.B);
         }
+        // Заменяем кисти в ресурсах окна: DynamicResource обновляет уже созданные элементы.
+        // Предпросмотр не пишет на диск; событие Applied обновляет подсветку редакторов.
         public void Preview(AppTheme theme)
         {
             ValidateTheme(theme); Current = Data.Clone(theme);

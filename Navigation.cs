@@ -11,6 +11,7 @@ using System.Windows.Threading;
 
 namespace RestAgent
 {
+    // Размер и видимость панели хранятся отдельно от коллекции: view-settings.json.
     public sealed class ViewSettings
     {
         public double SidebarWidth { get; set; }
@@ -18,9 +19,11 @@ namespace RestAgent
         public ViewSettings() { SidebarWidth = 280; }
     }
 
+    // Эта часть контроллера отвечает за панель, правку имени в шапке и перетаскивание дерева.
     public sealed partial class Controller
     {
         const string LibraryDragFormat = "RestAgent.LibraryNode";
+        // Принимаем перенос только из этого экземпляра приложения, а не посторонние данные.
         readonly string dragSession = Guid.NewGuid().ToString("N");
         readonly ViewSettings viewSettings = new ViewSettings();
         bool titleRenaming;
@@ -49,6 +52,8 @@ namespace RestAgent
             }
             return null;
         }
+        // Проверяем также родительские элементы: событие может прийти от внутренней части поля.
+        // Горячие клавиши дерева не должны перехватывать Delete при редактировании текста.
         static bool IsTextEditing(DependencyObject source)
         {
             return Ancestor<TextBoxBase>(source) != null || Ancestor<PasswordBox>(source) != null;
@@ -87,6 +92,8 @@ namespace RestAgent
             InitializeLibraryDrag();
             Control<Grid>("TitleRow").SizeChanged += delegate { Control<TextBlock>("RequestTitle").MaxWidth = Math.Max(20, Control<Grid>("TitleRow").ActualWidth - 38); };
         }
+        // Запомненная ширина не теряется при уменьшении окна: ограничиваем только отображение,
+        // оставляя место редактору. У скрытой панели обнуляем также колонку разделителя.
         void ApplySidebar()
         {
             var sidebar = (ColumnDefinition)window.FindName("SidebarColumn");
@@ -124,6 +131,8 @@ namespace RestAgent
             Control<TextBlock>("RequestTitle").Visibility = Visibility.Collapsed; Control<Button>("RenameTitle").Visibility = Visibility.Collapsed;
             input.Visibility = Visibility.Visible; input.Focus(); input.SelectAll();
         }
+        // Сохранённый запрос переименовываем сразу в коллекции, новый — только в редакторе.
+        // Сброс флага в начале защищает от повторного вызова через LostKeyboardFocus.
         void FinishTitleRename(bool save)
         {
             if (!titleRenaming) return; titleRenaming = false;
@@ -159,6 +168,8 @@ namespace RestAgent
         {
             var data = new DataObject(); data.SetData(LibraryDragFormat, dragSession + "|" + NodeKey(node)); return data;
         }
+        // В переносе хранится ключ, а не объект модели: после обновления дерева находим
+        // актуальную запись в workspace и проверяем принадлежность текущему сеансу.
         object DragNode(IDataObject data)
         {
             if (!data.GetDataPresent(LibraryDragFormat, false)) return null;
@@ -166,6 +177,7 @@ namespace RestAgent
             string prefix = dragSession + "|";
             return payload == null || !payload.StartsWith(prefix, StringComparison.Ordinal) ? null : NodeByKey(payload.Substring(prefix.Length));
         }
+        // Сброс на запрос означает его папку; на свободное место — корень коллекции.
         string DropFolder(TreeViewItem item)
         {
             var folder = item == null ? null : item.Tag as Folder; var request = item == null ? null : item.Tag as Request;
@@ -201,7 +213,8 @@ namespace RestAgent
                 if (IsTextEditing(source) || Ancestor<ButtonBase>(source) != null) return;
                 var item = Ancestor<TreeViewItem>(source);
                 if (item == null || item.Tag == null || !OverHeader(item, e.GetPosition(item))) return;
-                // Select on mouse-up, allowing another item to move without replacing an unsaved editor.
+                // Выбираем строку при отпускании мыши: перенос другой строки не должен
+                // открывать её запрос поверх текущего редактора с несохранёнными правками.
                 dragCandidate = item.Tag; dragOrigin = e.GetPosition(tree); e.Handled = true;
             };
             tree.PreviewMouseLeftButtonUp += delegate(object sender, MouseButtonEventArgs e)
@@ -214,6 +227,7 @@ namespace RestAgent
             {
                 if (e.LeftButton != MouseButtonState.Pressed) { dragCandidate = null; return; }
                 if (dragCandidate == null) return; Point point = e.GetPosition(tree);
+                // Системный порог отличает обычный щелчок от начала перетаскивания.
                 if (Math.Abs(point.X - dragOrigin.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(point.Y - dragOrigin.Y) < SystemParameters.MinimumVerticalDragDistance) return;
                 object node = dragCandidate; dragCandidate = null;
                 try { DragDrop.DoDragDrop(tree, LibraryDragData(node), DragDropEffects.Move); }
@@ -240,6 +254,7 @@ namespace RestAgent
             bool accepted = (e.AllowedEffects & DragDropEffects.Move) != 0 && node != null && CanDropNode(node, id);
             e.Effects = accepted ? DragDropEffects.Move : DragDropEffects.None; e.Handled = true;
             HighlightDrop(accepted ? target : null);
+            // Ограничиваем частоту автопрокрутки у краёв, чтобы дерево не прокручивалось рывком.
             if ((DateTime.UtcNow - lastDragScroll).TotalMilliseconds < 80) return;
             var tree = Control<TreeView>("Library"); Point point = e.GetPosition(tree); var scroll = Descendant<ScrollViewer>(tree);
             if (node != null && scroll != null) { if (point.Y < 24) scroll.LineUp(); else if (point.Y > tree.ActualHeight - 24) scroll.LineDown(); lastDragScroll = DateTime.UtcNow; }

@@ -16,6 +16,8 @@ using System.Windows.Threading;
 
 namespace RestAgent
 {
+    // Встроенные регрессионные проверки запускаются ключом --self-test.
+    // Рабочая коллекция из data не используется: контроллер получает временное хранилище.
     public static partial class SelfTest
     {
         static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
@@ -95,6 +97,8 @@ namespace RestAgent
         {
             return @"{""name"":""\u041d\u0430\u0431\u043e\u0440\u044b \u0434\u043b\u044f \u0440\u043e\u0437\u0435\u0442\u043a\u0430, \u0435\u043f\u0456\u0446\u0435\u043d\u0442\u0440, \u0442\u043c \u0434\u0438\u043b\u0435\u0440"",""name_multilang"":{""ru"":""\u041d\u0430\u0431\u043e\u0440\u044b \u0434\u043b\u044f \u0440\u043e\u0437\u0435\u0442\u043a\u0430, \u0435\u043f\u0456\u0446\u0435\u043d\u0442\u0440, \u0442\u043c \u0434\u0438\u043b\u0435\u0440"",""uk"":""\u041d\u0430\u0431\u043e\u0440\u0438 \u0434\u043b\u044f \u0440\u043e\u0437\u0435\u0442\u043a\u0430, \u0441\u0435\u043f\u0456\u0446\u0435\u043d\u0442\u0440, \u0442\u043c \u0434\u0438\u043b\u0435\u0440""}}";
         }
+        // Проверяем и читаемость Unicode, и сохранность JSON: слеши, кавычки,
+        // управляющие символы и суррогатные пары не должны менять смысл строки.
         static void TestReadableUnicode(List<string> report)
         {
             string pretty = Data.Pretty(UnicodeResponse(), true);
@@ -169,6 +173,8 @@ namespace RestAgent
             }
             report.Add("PASS header/query editors at 1000/1280: layout, custom names, list selection, dirty tracking, capture");
         }
+        // Вызываем закрытые действия контроллера для регрессионных сценариев,
+        // не расширяя публичный API приложения ради самотеста.
         static object Call(Controller controller, string method, params object[] args)
         { return typeof(Controller).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic).Invoke(controller, args); }
         static void TestQueryUrl(Controller controller, Window window, List<string> report)
@@ -605,6 +611,8 @@ namespace RestAgent
             response.Text = json; response.RefreshSyntax(); response.GroupJson();
             report.Add("PASS JSON groups: inline arrow expand/collapse, orders previews and independent groups, root/nested arrays, empty and one-line values, escaped braces, string whitespace/numeric precision, bounded preview, full copy/save source, refresh persistence, plain/large document limits");
         }
+        // Временный localhost-сервер проверяет фактически переданные URL, заголовки и тело,
+        // затем возвращает заданный ответ. Доступ к внешним API для этого теста не нужен.
         static void TestRequest(Controller controller, Window window, string method, int status, string body, List<string> report, bool? withBody = null, string contentType = "application/json")
         {
             bool sendBody = withBody ?? method == "POST";

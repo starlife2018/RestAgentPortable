@@ -7,11 +7,14 @@ using System.Windows.Shapes;
 
 namespace RestAgent
 {
+    // Векторные иконки из ресурсов Main.xaml: масштабируются вместе с интерфейсом.
     public static class UiIcons
     {
         public static Path Create(FrameworkElement owner, string key, double size = 16)
         {
             var path = new Path { Data = (Geometry)owner.FindResource("Icon" + key), Width = size, Height = size, Stretch = Stretch.Uniform, StrokeThickness = 1.4, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, StrokeLineJoin = PenLineJoin.Round, VerticalAlignment = VerticalAlignment.Center };
+            // Цвет берётся у ближайшего контрола, поэтому иконка реагирует на тему
+            // и состояния кнопки/меню без отдельной перекраски.
             path.SetBinding(Shape.StrokeProperty, new Binding("Foreground") { RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(Control), 1) });
             return path;
         }

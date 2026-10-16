@@ -10,6 +10,7 @@
         FontSize="13"
         Foreground="{DynamicResource TextBrush}"
         WindowStartupLocation="CenterScreen" UseLayoutRounding="True" SnapsToDevicePixels="True">
+    <!-- Иконки, общие стили и шаблоны. DynamicResource позволяет менять тему без пересоздания окна. -->
     <Window.Resources>
         <Geometry x:Key="IconHistory">M 2,5 A 6,6 0 1 1 2,11 M 1,1 L 1,5 L 5,5 M 8,4 L 8,8 L 11,10</Geometry>
         <Geometry x:Key="IconCollection">M 2,3 C 2,0 14,0 14,3 C 14,6 2,6 2,3 M 2,3 L 2,12 C 2,15 14,15 14,12 L 14,3 M 2,7 C 2,10 14,10 14,7</Geometry>
@@ -290,6 +291,7 @@
             <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="Action" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Action" Property="Background" Value="{DynamicResource SidebarHoverBrush}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
         </Style>
  </Window.Resources>
+    <!-- Три колонки: коллекция, разделитель и редактор. Шириной управляет Navigation.cs. -->
     <Grid x:Name="WorkspaceLayout" Background="{DynamicResource AppBackgroundBrush}">
         <Grid.ColumnDefinitions>
             <ColumnDefinition x:Name="SidebarColumn" Width="280" MinWidth="220" MaxWidth="520"/>
@@ -407,6 +409,7 @@
                     Background="{DynamicResource SurfaceBrush}"
                     CornerRadius="10"
                     Padding="10">
+                <!-- Порядок вкладок: заголовки, параметры, тело. Строки таблиц привязаны к Pair. -->
                 <TabControl x:Name="RequestTabs" BorderThickness="0" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
                     <TabItem Header="Заголовки">
                         <DockPanel>
@@ -504,6 +507,7 @@
                         <Button x:Name="CopyResponse" Content="Копировать"/>
                         <Button x:Name="SaveResponse" Content="Сохранить"/>
                     </WrapPanel>
+                    <!-- Body и ResponseBody заменяются редакторами AvalonEdit в CodeEditor.Install. -->
                     <TabControl x:Name="ResponseTabs" BorderThickness="0" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
                         <TabItem Header="Тело">
                             <DockPanel>

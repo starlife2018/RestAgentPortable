@@ -2,6 +2,8 @@
 
 Портативное Windows-приложение для тестирования REST API. Интерфейс на русском языке: коллекции слева, редактор запроса сверху, ответ снизу. Работает без установки и прав администратора.
 
+Как получить готовый EXE после изменения исходников: [пошаговая инструкция по сборке](BUILD.md).
+
 ## Запуск
 
 Готовая portable-сборка: [RestAgentPortable-Windows.zip](https://github.com/starlife2018/RestAgentPortable/releases/latest/download/RestAgentPortable-Windows.zip). Распакуйте архив в доступную для записи папку и запустите EXE.
